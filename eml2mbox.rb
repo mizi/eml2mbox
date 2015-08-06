@@ -32,25 +32,13 @@
 # script; if not, please visit http://www.gnu.org/copyleft/gpl.html for more information.    #
 #============================================================================================#
 
-require "parsedate"
-
-include ParseDate
+require 'time'
 
 #=======================================================#
 # Class that encapsulates the processing file in memory #
 #=======================================================#
 
 class FileInMemory
-    
-    ZoneOffset = {
-        # Standard zones by RFC 2822
-        'UTC' => '0000', 
-        'UT' => '0000', 'GMT' => '0000',
-        'EST' => '-0500', 'EDT' => '-0400',
-        'CST' => '-0600', 'CDT' => '-0500',
-        'MST' => '-0700', 'MDT' => '-0600',
-        'PST' => '-0800', 'PDT' => '-0700',
-    }   
     
     def initialize()
         @lines = Array.new
@@ -61,30 +49,38 @@ class FileInMemory
 
     def addLine(line)
         # If the line is a 'false' From line, add a '>' to its beggining
-        line = line.sub(/From/, '>From') if line =~ /^From/ and @from!=nil
+        line = line.sub(/From/i, '>From') if line =~ /^From/i and @from!=nil
 
         # If the line is the first valid From line, save it (without the line break)
-        if line =~ /^From:\s.*@/ and @from==nil
-            @from = line.sub(/From:/,'From')
-            @from = @from.chop    # Remove line break(s)
+				if @counter > 0
+					prev_line = @lines[@counter - 1]
+				else
+					prev_line = nil
+				end
+				if prev_line!=nil and prev_line =~ /^From:\s/i and line =~ /\s+\S/ and @from==nil
+					line = prev_line.strip + ' ' + line.strip
+					@counter -= 1
+				end
+        if line =~ /^From:\s.*@/i and @from==nil
+            @from = line.sub(/From:/i,'From')
+            @from = @from.strip    # Remove line break(s)
             @from = standardizeFrom(@from) unless $switches["noStandardFromLine"]
         end
 
         # Get the date
         if $switches["noStandardFromLine"]
             # Don't parse the content of the Date header
-            @date = line.sub(/Date:\s/,'') if line =~ /^Date:\s/ and @date==nil
+            @date = line.sub(/Date:\s/i,'') if line =~ /^Date:\s/i and @date==nil
         else
-            if line =~ /^Date:\s/ and @date==nil
+            if line =~ /^Date:\s/i and @date==nil
                 # Parse content of the Date header and convert to the mbox standard for the From_ line
-                @date = line.sub(/Date:\s/,'')
-                year, month, day, hour, minute, second, timezone, wday = parsedate(@date)
-                # Need to convert the timezone from a string to a 4 digit offset
-                unless timezone =~ /[+|-]\d*/
-                    timezone=ZoneOffset[timezone]
-                end
-                time = Time.gm(year,month,day,hour,minute,second)
-                @date = formMboxDate(time,timezone)
+                @date = line.sub(/Date:\s/i,'')
+								begin
+                    time = DateTime.parse(@date)
+								rescue
+								else
+								    @date = formMboxDate(time)
+								end
             end
         end
 
@@ -101,7 +97,7 @@ class FileInMemory
             # Add from and date to the first line
             if @date==nil
                 puts "WARN: Failed to extract date. Will use current time in the From_ line"
-                @date=formMboxDate(Time.now,nil)
+                @date=formMboxDate(Time.now)
             end
             @lines[0] = @from + " " + @date 
             
@@ -156,15 +152,11 @@ end
 # If timezone is unknown, it is skipped.
 # mbox date format used is described here:
 # http://www.broobles.com/eml2mbox/mbox.html
-def formMboxDate(time,timezone)
-    if timezone==nil
-        return time.strftime("%a %b %d %H:%M:%S %Y")
+def formMboxDate(time)
+    if $switches["zoneYearOrder"]
+        return time.strftime("%a %b %d %H:%M:%S %z %Y")
     else
-        if $switches["zoneYearOrder"]
-            return time.strftime("%a %b %d %H:%M:%S "+timezone.to_s+" %Y")
-        else 
-            return time.strftime("%a %b %d %H:%M:%S %Y "+timezone.to_s)
-        end
+        return time.strftime("%a %b %d %H:%M:%S %Y %z")
     end
 end
 
@@ -253,7 +245,7 @@ end
         files.each() do |x|
             puts "Processing file: "+x
             thisFile = FileInMemory.new()
-            File.open(x).each  {|item| thisFile.addLine(item) }
+            File.open(x, "r:iso-8859-1").each  {|item| thisFile.addLine(item) }
             lines = thisFile.getProcessedLines
             if lines == nil
                 puts "WARN: File ["+x+"] doesn't seem to have a regular From: line. Not included in mbox"
